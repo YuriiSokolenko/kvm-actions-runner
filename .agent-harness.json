@@ -1,0 +1,280 @@
+{
+  "version": 1,
+  "git": {
+    "defaultBranch": "dev",
+    "issueBranchPrefix": "pi/issue-",
+    "checkpointBranchSuffix": "-checkpoint",
+    "identity": {
+      "name": "social-mcp-pi",
+      "email": "social-mcp-pi@users.noreply.github.com"
+    }
+  },
+  "labels": {
+    "queued": "dispatcher:ready",
+    "triageReady": "triage:ready",
+    "ready": "pi:ready",
+    "running": "pi:running",
+    "pr": "pi:mr-created",
+    "needsHuman": "pi:needs-human",
+    "blocked": "pi:blocked",
+    "architectReady": "architect:ready",
+    "epic": "architect:epic",
+    "reviewPassed": "review:passed",
+    "reviewChangesRequested": "review:changes-requested"
+  },
+  "workflows": {
+    "dispatcher": "pi-dispatcher.yml",
+    "architect": "pi-architect.yml",
+    "implementer": "pi-issue-agent.yml",
+    "reviewer": "pi-pr-review.yml",
+    "repair": "pi-pr-fix.yml",
+    "ci": "ci.yml",
+    "mergeGate": "pi-auto-merge.yml",
+    "triage": "pi-triage.yml"
+  },
+  "automation": {
+    "modeVariable": "PI_AUTOMATION_MODE"
+  },
+  "agents": {
+    "promptsDir": "agents"
+  },
+  "model": {
+    "provider": "hp-laguna",
+    "baseUrl": "http://192.168.8.184:4001/v1",
+    "choices": {
+      "laguna": {
+        "id": "laguna-s-2.1-gguf",
+        "label": "Laguna S 2.1"
+      },
+      "qwen": {
+        "id": "Qwen3.8-Flash-Next-NVFP4",
+        "label": "Qwen 3.8 Flash Next NVFP4"
+      },
+      "swift": {
+        "id": "swift-1.5-qwen3.8-flash-next",
+        "label": "Swift 1.5 (Qwen 3.8 Flash Next, TensorFold)"
+      }
+    }
+  },
+  "workspace": {
+    "cleanDirectories": [
+      ".pytest_cache",
+      ".ruff_cache",
+      "htmlcov",
+      "build",
+      "dist"
+    ],
+    "cleanFiles": [
+      ".coverage",
+      "coverage.xml"
+    ]
+  },
+  "controlPlane": {
+    "prefixes": [
+      ".github/workflows/",
+      ".pi/",
+      "agents/",
+      "tests/acceptance_probes/",
+      "infra/github-runner-autoscaler/"
+    ],
+    "exact": [
+      "tests/test_runner_autoscaler.sh"
+    ],
+    "patterns": [
+      "^scripts/pi-(?:[^/]+\\.(?:mjs|sh)|[^/]+/)",
+      "^tests/[^/]+\\.test\\.mjs$"
+    ]
+  },
+  "checks": {
+    "final": [
+      {
+        "name": "package roots",
+        "builtin": "package_roots"
+      },
+      {
+        "name": "ruff",
+        "builtin": "ruff"
+      },
+      {
+        "name": "git diff --check",
+        "command": "git",
+        "args": [
+          "diff",
+          "--check"
+        ]
+      },
+      {
+        "name": "pytest",
+        "command": "pytest",
+        "args": []
+      }
+    ],
+    "profiles": {
+      "node_tests": {
+        "command": "node",
+        "args": [
+          "--test",
+          {
+            "files": {
+              "dir": "tests",
+              "pattern": "\\.test\\.mjs$"
+            }
+          }
+        ]
+      },
+      "pytest_all": {
+        "command": "pytest",
+        "args": [
+          "-q",
+          "--tb=short",
+          "-rfE",
+          "--no-header",
+          "-p",
+          "no:cacheprovider"
+        ]
+      }
+    },
+    "ciRepairableSteps": [
+      "Ruff",
+      "Pytest",
+      "Harness Python checks",
+      "Agent workflow checks",
+      "Runner autoscaler checks"
+    ],
+    "packageRoots": {
+      "canonicalRoots": [
+        "src"
+      ],
+      "allowDuplicatePackages": []
+    }
+  },
+  "environment": {
+    "pathPrepend": [
+      ".venv/bin"
+    ],
+    "stages": {
+      "implementer": [
+        {
+          "name": "python version",
+          "command": "python",
+          "args": [
+            "--version"
+          ]
+        },
+        {
+          "name": "sqlite version",
+          "command": "sqlite3",
+          "args": [
+            "--version"
+          ]
+        },
+        {
+          "name": "create venv",
+          "command": "python",
+          "args": [
+            "-m",
+            "venv",
+            ".venv"
+          ]
+        },
+        {
+          "name": "upgrade pip",
+          "command": "python",
+          "args": [
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "pip"
+          ]
+        },
+        {
+          "name": "install project",
+          "command": "python",
+          "args": [
+            "-m",
+            "pip",
+            "install",
+            "-e",
+            "."
+          ]
+        },
+        {
+          "name": "install dev tools",
+          "command": "python",
+          "args": [
+            "-m",
+            "pip",
+            "install",
+            "pytest==9.1.1",
+            "pytest-asyncio==1.4.0",
+            "ruff==0.17.0",
+            "PyYAML==6.0.3"
+          ]
+        },
+        {
+          "name": "pytest version",
+          "command": "pytest",
+          "args": [
+            "--version"
+          ]
+        },
+        {
+          "name": "ruff version",
+          "command": "ruff",
+          "args": [
+            "--version"
+          ]
+        }
+      ],
+      "reviewer": [
+        {
+          "name": "create venv",
+          "command": "python",
+          "args": [
+            "-m",
+            "venv",
+            ".venv"
+          ]
+        },
+        {
+          "name": "install project and dev tools",
+          "command": "pip",
+          "args": [
+            "install",
+            "-e",
+            ".",
+            "pytest==9.1.1",
+            "pytest-asyncio==1.4.0",
+            "ruff==0.17.0",
+            "PyYAML==6.0.3"
+          ]
+        }
+      ],
+      "repair": [
+        {
+          "name": "create venv",
+          "command": "python",
+          "args": [
+            "-m",
+            "venv",
+            ".venv"
+          ]
+        },
+        {
+          "name": "install project and dev tools",
+          "command": "pip",
+          "args": [
+            "install",
+            "-e",
+            ".",
+            "pytest==9.1.1",
+            "pytest-asyncio==1.4.0",
+            "ruff==0.17.0",
+            "PyYAML==6.0.3"
+          ]
+        }
+      ]
+    }
+  }
+}
