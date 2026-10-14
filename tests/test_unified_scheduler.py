@@ -26,8 +26,6 @@ class FakeExecutors:
             return {"ok": True, "disk_free_mb": 30000, "healthy": True}
         if cmd == "list":
             return {"ok": True, "workers": [
-                dict(worker) for worker in self.workers if worker["backend"] == backend
-            ] if False else [
                 {key: worker[key] for key in ("pool", "name", "running")}
                 for worker in self.workers if worker["backend"] == backend
             ]}
@@ -53,6 +51,7 @@ class FakeAPI:
         self.token = "github_pat_admin_test_token_1234567890123456"
         self.demands = {}
         self.removed = []
+        self.extra_runners = []
 
     def queued_jobs_by_pool(self, pools):
         return {p.id: self.demands.get(p.id, 0) for p in pools if p.mode == "ephemeral"}
@@ -63,7 +62,7 @@ class FakeAPI:
             pool = self.pools[worker["pool"]]
             if pool.repository == self.repository:
                 results.append(Runner(index, worker["name"], False, "online"))
-        return results
+        return results + self.extra_runners
 
     def registration_token(self):
         return "test_ephemeral_token_1234567890123456789"
@@ -143,6 +142,17 @@ class SchedulerTest(unittest.TestCase):
         self.assertEqual(1, self.executor.started.count("control"))
         self.assertEqual(1, self.executor.started.count("pi"))
         self.assertEqual(2, len(self.scheduler.journal.entries))
+
+    def test_unknown_busy_registration_reserves_a_global_slot(self):
+        self.demand("general", 3)
+        api = self.clients["YuriiSokolenko/social-mcp"]
+        api.extra_runners = [Runner(999, "n150-gen-eph-remote-busy", True, "online")]
+        self.tick()
+        # Three desired minus one busy-but-unseen registration: only two
+        # launches can be admitted even if Docker reports no such worker.
+        self.assertEqual(2, self.executor.started.count("general"))
+        self.tick()
+        self.assertEqual(2, self.executor.started.count("general"))
 
     def test_corrupt_journal_fails_closed(self):
         path = self.config.state_dir / "pending.json"

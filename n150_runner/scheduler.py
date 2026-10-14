@@ -239,6 +239,18 @@ class Scheduler:
             if pending.pool not in {p.id for p in self.config.pools}:
                 raise RuntimeError("SCHEDULER_JOURNAL_POOL_INVALID")
             counts[pending.pool] += 1
+        # Treat still-busy GitHub registrations without a visible backend
+        # worker as occupied slots. A crashed/offline worker must not allow
+        # another manager-controlled launch to overbook the same pool.
+        known = {w.name for w in workers if w.running} | set(self.journal.entries)
+        for pool in self.config.pools:
+            if pool.mode != "ephemeral":
+                continue
+            counts[pool.id] += sum(
+                1 for reg in runners[pool.repository].values()
+                if reg.busy and reg.name.startswith(pool.runner_prefix + "-")
+                and reg.name not in known
+            )
         pools = self.config.pools
         control = next(p for p in pools if p.mode == "persistent")
         if counts[control.id] < 1 and now >= self.retry_after[control.id]:
