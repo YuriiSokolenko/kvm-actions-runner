@@ -26,6 +26,22 @@ belong only to separate executors that accept fixed, pool-scoped commands throug
 Unix sockets. Run-check has its own independently constrained Docker service.
 The persistent Control worker is managed but is NOT a second autoscaler.
 
+## Target platform and validation policy
+
+**Beelink N150 running Ubuntu Linux is the sole deployment and acceptance
+target for this project.** The runner manager, Docker executors and QEMU/KVM
+guests are designed for the Beelink host, not for macOS.
+
+- Do **not** require MacBook/macOS builds, tests or compatibility fixes.
+  macOS-only failures of the copied KVM backend (for example `EBADF` or
+  exit code `126`) are not release blockers if they do not reproduce on N150.
+- GitHub-hosted Linux CI and offline unit tests are useful preliminary checks,
+  but **cannot replace integration and acceptance tests on the actual Beelink**.
+- Before approval for deployment, validate image builds, Docker socket/Unix
+  socket permissions, `/dev/kvm` and QEMU, all four worker pools,
+  admissions and recovery, and the observed CPU-admission behavior from #795
+  **on Beelink N150**.
+
 ## Offline developer checks
 
 Requires Python 3.12; optional Docker Compose v2:
