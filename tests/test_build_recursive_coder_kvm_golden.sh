@@ -27,26 +27,33 @@ if grep -E 'hostfwd|virtiofs|9p|docker.sock|ACTIONS_RUNNER_INPUT_TOKEN|RECURSIVE
 fi
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
+# Negative checksum/mode fixtures must run on ordinary GitHub-hosted CI
+# without /dev/kvm. Only the ephemeral TEST COPY skips the production
+# check_host call. The original builder must still contain and call it.
+grep -Fxq 'check_host' "$builder" || fail 'production builder host preflight missing'
+offline_builder="$tmp/build-offline.sh"
+sed '/^check_host$/d' "$builder" > "$offline_builder"
+chmod 0755 "$offline_builder"
 mkdir "$tmp/out"
 printf 'wrong pinned source\n' >"$tmp/wrong.img"
 chmod 0444 "$tmp/wrong.img"
-if KVM_BUILDER_BASE_IMAGE="$tmp/wrong.img" KVM_BUILDER_OUTPUT_DIR="$tmp/out" bash "$builder" --dry-run >"$tmp/output" 2>&1; then
+if KVM_BUILDER_BASE_IMAGE="$tmp/wrong.img" KVM_BUILDER_OUTPUT_DIR="$tmp/out" bash "$offline_builder" --dry-run >"$tmp/output" 2>&1; then
   fail 'builder preflight accepted an unpinned base image'
 fi
 grep -Fq 'stock image digest mismatch' "$tmp/output" || fail 'read-only source was rejected before checksum verification'
 [ -z "$(find "$tmp/out" -mindepth 1 -print -quit)" ] || fail 'failed dry-run modified output directory'
 printf 'writable source\n' >"$tmp/writable.img"
 chmod 0644 "$tmp/writable.img"
-if KVM_BUILDER_BASE_IMAGE="$tmp/writable.img" KVM_BUILDER_OUTPUT_DIR="$tmp/out" bash "$builder" --dry-run >"$tmp/output" 2>&1; then
+if KVM_BUILDER_BASE_IMAGE="$tmp/writable.img" KVM_BUILDER_OUTPUT_DIR="$tmp/out" bash "$offline_builder" --dry-run >"$tmp/output" 2>&1; then
   fail 'builder accepted a source image with write permission bits'
 fi
 grep -Fq 'stock image has write permission bits' "$tmp/output" || fail 'writable source was not rejected by mode-bit validation'
-if KVM_BUILDER_BASE_IMAGE="$tmp/missing.img" KVM_BUILDER_OUTPUT_DIR="$tmp/out" bash "$builder" --dry-run >"$tmp/output" 2>&1; then
+if KVM_BUILDER_BASE_IMAGE="$tmp/missing.img" KVM_BUILDER_OUTPUT_DIR="$tmp/out" bash "$offline_builder" --dry-run >"$tmp/output" 2>&1; then
   fail 'builder accepted a missing source image'
 fi
 grep -Fq 'readable regular non-symlink' "$tmp/output" || fail 'missing source was not rejected clearly'
 ln -s "$tmp/writable.img" "$tmp/symlink.img"
-if KVM_BUILDER_BASE_IMAGE="$tmp/symlink.img" KVM_BUILDER_OUTPUT_DIR="$tmp/out" bash "$builder" --dry-run >"$tmp/output" 2>&1; then
+if KVM_BUILDER_BASE_IMAGE="$tmp/symlink.img" KVM_BUILDER_OUTPUT_DIR="$tmp/out" bash "$offline_builder" --dry-run >"$tmp/output" 2>&1; then
   fail 'builder accepted a symlink source image'
 fi
 grep -Fq 'readable regular non-symlink' "$tmp/output" || fail 'symlink source was not rejected clearly'
@@ -55,7 +62,7 @@ grep -Fq 'readable regular non-symlink' "$tmp/output" || fail 'symlink source wa
 if [[ -n "${KVM_BUILDER_TEST_PINNED_IMAGE:-}" ]]; then
   pinned_output="${KVM_BUILDER_TEST_OUTPUT_DIR:-$tmp/out}"
   mkdir -p "$pinned_output"
-  KVM_BUILDER_BASE_IMAGE="$KVM_BUILDER_TEST_PINNED_IMAGE" KVM_BUILDER_OUTPUT_DIR="$pinned_output" bash "$builder" --dry-run >"$tmp/output" 2>&1 || { cat "$tmp/output" >&2; fail 'builder rejected the staged pinned read-only image'; }
+  KVM_BUILDER_BASE_IMAGE="$KVM_BUILDER_TEST_PINNED_IMAGE" KVM_BUILDER_OUTPUT_DIR="$pinned_output" bash "$offline_builder" --dry-run >"$tmp/output" 2>&1 || { cat "$tmp/output" >&2; fail 'builder rejected the staged pinned read-only image'; }
   grep -Fq 'Read-only preflight passed' "$tmp/output" || fail 'pinned dry-run did not complete'
 fi
 # v2 must build from the v1 image, pin all downloaded toolchains,
@@ -90,7 +97,7 @@ PY
 if grep -E 'ACTIONS_RUNNER_INPUT_TOKEN|RECURSIVE_CODER_GH_ADMIN_TOKEN|hostfwd|docker.sock' "$v2"; then
   fail 'v2 build embeds credentials or a host-escape interface'
 fi
-if KVM_BUILDER_V1_IMAGE="$tmp/wrong.img" KVM_BUILDER_OUTPUT_DIR="$tmp/out" bash "$builder" --dry-run-v2 >"$tmp/output" 2>&1; then
+if KVM_BUILDER_V1_IMAGE="$tmp/wrong.img" KVM_BUILDER_OUTPUT_DIR="$tmp/out" bash "$offline_builder" --dry-run-v2 >"$tmp/output" 2>&1; then
   fail 'v2 accepted an unpinned parent image'
 fi
 grep -Fq 'stock image digest mismatch' "$tmp/output" || fail 'v2 pinned parent was not validated'

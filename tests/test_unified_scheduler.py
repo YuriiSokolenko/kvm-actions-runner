@@ -136,15 +136,13 @@ class SchedulerTest(unittest.TestCase):
         self.demand("pi", 1)
         self.executor.hide_started = True
         self.tick()
-        self.assertEqual(["control"], self.executor.started)
-        # Control pending blocks ephemeral scheduling until its worker is seen.
-        self.executor.hide_started = False
-        self.now += 181
+        self.assertEqual(["control", "pi"], self.executor.started)
+        # Both launches are durably reserved even before backend visibility.
+        # A repeated poll cannot start either a second Control or Pi worker.
         self.tick()
-        self.assertIn("pi", self.executor.started)
-        self.executor.hide_started = True
-        self.tick()
+        self.assertEqual(1, self.executor.started.count("control"))
         self.assertEqual(1, self.executor.started.count("pi"))
+        self.assertEqual(2, len(self.scheduler.journal.entries))
 
     def test_corrupt_journal_fails_closed(self):
         path = self.config.state_dir / "pending.json"
