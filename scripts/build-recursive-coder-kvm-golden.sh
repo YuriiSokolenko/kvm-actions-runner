@@ -105,17 +105,17 @@ assert len(p["package_manifest_sha256"])==64
 PY
   echo "CANDIDATE_SHA256=$digest"
 }
-check_host
 case "$mode" in
 --dry-run|--dry-run-v2)
  check_base
+ check_host
  check_space "$out"
  echo 'Read-only preflight passed; no VM/image created.' ;;
---verify) [[ $# = 2 ]] || { usage >&2; exit 2; }; validate "$candidate" ;;
+--verify) [[ $# = 2 ]] || { usage >&2; exit 2; }; check_host; validate "$candidate" ;;
 --promote-dry-run|--promote)
  [[ $# = 2 ]] || { usage >&2; exit 2; }
  [[ "$mode" = --promote-dry-run || "$(id -u)" = 0 ]] || fail 'promotion requires owner-run sudo; this script never invokes sudo'
- validate "$candidate"
+ check_host; validate "$candidate"
  [[ -d "$golden" && "$(stat -c %u:%g:%a "$golden")" = 0:0:755 ]] || fail 'golden directory not prepared'
  if docker inspect recursive-coder-kvm-runner-manager >/dev/null 2>&1; then
    if [[ "$(docker inspect recursive-coder-kvm-runner-manager --format "{{.State.Running}}")" = true ]]; then
@@ -151,7 +151,7 @@ case "$mode" in
    active="$(docker exec recursive-coder-kvm-runner-manager python3 /usr/local/bin/kvm-backend.py list)" || fail 'cannot inspect active KVM guests'
    [[ -z "$active" ]] || fail 'wait until current KVM job has been cleaned up before building v2'
  fi
- check_base; command -v xorriso >/dev/null || fail 'build requires xorriso; install it through the owner-approved host preparation procedure'; mkdir -p "$out"
+ check_host; check_base; command -v xorriso >/dev/null || fail 'build requires xorriso; install it through the owner-approved host preparation procedure'; mkdir -p "$out"
  check_space "$out"
  exec 9>"$out/build.lock"; flock -n 9 || fail 'another image build is active'
  tmp="$(mktemp -d "$out/.build.XXXXXX")"
