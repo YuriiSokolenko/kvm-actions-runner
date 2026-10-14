@@ -1,0 +1,83 @@
+import json
+import unittest
+from urllib.parse import urlsplit, parse_qs
+
+from n150_runner.config import load_config
+from n150_runner.github_api import GitHub, GitHubError
+
+CONFIG = load_config("config/pools.json")
+PI, GENERAL = [p for p in CONFIG.pools if p.id in ("pi", "general")]
+
+
+class Response:
+    def __init__(self, value):
+        self.value = json.dumps(value).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *unused):
+        return None
+
+    def read(self, size):
+        return self.value[:size]
+
+
+def run(id, workflow, event="push", head="YuriiSokolenko/social-mcp"):
+    return {"id": id, "path": ".github/workflows/" + workflow, "event": event,
+            "head_repository": {"full_name": head}}
+
+
+def job(labels, status="queued"):
+    return {"status": status, "labels": labels}
+
+
+class FixtureAPI:
+    def __init__(self):
+        self.calls = []
+        self.invalid = False
+
+    def __call__(self, request, timeout):
+        path = urlsplit(request.full_url)
+        query = parse_qs(path.query)
+        self.calls.append((path.path, query))
+        if "/actions/runs/" in path.path and "/jobs" in path.path:
+            runid = int(path.path.split("/runs/")[1].split("/")[0])
+            jobs = {
+                10: [job(["self-hosted", "linux", "x64", "n150", "pi-agent"])],
+                20: [job(["self-hosted", "linux", "x64", "n150", "general"])],
+                30: [job(["self-hosted", "linux", "x64", "n150", "general"])],
+                40: [job(["self-hosted", "linux", "x64", "n150", "general", "control"])],
+            }[runid]
+            return Response({"total_count": len(jobs), "jobs": jobs})
+        if "/actions/runs" in path.path:
+            if self.invalid:
+                return Response({"total_count": 2, "workflow_runs": []})
+            status = query["status"][0]
+            runs = [run(10, "pi-issue-agent.yml"),
+                    run(20, "ci.yml", "pull_request"),
+                    run(30, "ci.yml", "pull_request", "malicious/fork"),
+                    run(40, "ci.yml")] if status == "queued" else []
+            return Response({"total_count": len(runs), "workflow_runs": runs})
+        raise AssertionError("unexpected endpoint")
+
+
+class GitHubDiscoveryTest(unittest.TestCase):
+    def test_exact_labels_reject_forks_and_wrong_lane(self):
+        fixture = FixtureAPI()
+        client = GitHub("YuriiSokolenko/social-mcp", "test-token", opener=fixture)
+        counts = client.queued_jobs_by_pool([PI, GENERAL])
+        self.assertEqual({"pi": 1, "general": 1}, counts)
+        self.assertGreaterEqual(len(fixture.calls), 3)
+
+    def test_partial_pages_rejected_without_partial_demand(self):
+        fixture = FixtureAPI()
+        fixture.invalid = True
+        client = GitHub("YuriiSokolenko/social-mcp", "test-token", opener=fixture)
+        with self.assertRaises(GitHubError) as cm:
+            client.queued_jobs_by_pool([PI, GENERAL])
+        self.assertEqual("GITHUB_INCOMPLETE_PAGES", cm.exception.code)
+
+
+if __name__ == "__main__":
+    unittest.main()
