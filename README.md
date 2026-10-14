@@ -63,3 +63,24 @@ SHA-256: 9fc0ce202ba8def25b126323af21d5a5bb0fb8903cb7367f2fc246ae568e1706.
 Never overwrite this image, its predecessor, host state or protected volumes.
 
 Epic: https://github.com/YuriiSokolenko/kvm-actions-runner/issues/1
+
+## GitHub API budget and demand freshness
+
+The scheduler polls at 10-second intervals to monitor runner health and
+maintain Control readiness, but GitHub workflow/run/job discovery is cached
+per repository and pool selector: a complete, nonempty demand snapshot has
+a 30-second TTL, and an empty snapshot has a 60-second TTL. Repeated polls
+reuse this verified result; invalid or incomplete replies are never cached.
+Runner busy/online status remains live on every poll, so quota accounting
+does not rely on stale busy flags.
+
+After the GitHub API signals a rate limit, the repository client cools down
+for at least 60 seconds instead of issuing failing calls on every poll.
+Capacity admission fails closed during API outages; no stale demand snapshot
+is used beyond its TTL. Review API usage before changing poll cadence,
+workflow selectors or the number of active workflow runs.
+
+The General workflow_run consumers observed in social-mcp/dev are
+pi-reconcile.yml and pi-usage.yml, and both explicitly check out trusted
+dev rather than the triggering head. Changes to that trust assumption
+require a separate review before production.
