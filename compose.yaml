@@ -1,0 +1,51 @@
+name: kvm-actions-runner
+services:
+  kvm-runner-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${KVM_MANAGER_IMAGE:-n150/recursive-coder-kvm-runner-manager:1.0.0}
+    container_name: recursive-coder-kvm-runner-manager
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 120s
+    environment:
+      GH_ADMIN_TOKEN: ${RECURSIVE_CODER_GH_ADMIN_TOKEN:?A repository-scoped token is required}
+      GITHUB_REPOSITORY: YuriiSokolenko/recursive-coder
+      MAX_RUNNERS: "1"
+      POLL_SECONDS: "30"
+      WORKER_MEMORY_MB: "5120"
+      KVM_GUEST_CPUS: "2"
+      KVM_GUEST_MEMORY_MB: "4096"
+      KVM_OVERLAY_MAX_GIB: "24"
+      KVM_MAX_LIFETIME_SECONDS: "1800"
+      KVM_MIN_HOST_CPU_HEADROOM: "1"
+      KVM_GOLDEN_IMAGE: /golden/noble-server-cloudimg-amd64-prepared-9fc0ce202ba8.img
+      KVM_GOLDEN_SHA256: 9fc0ce202ba8def25b126323af21d5a5bb0fb8903cb7367f2fc246ae568e1706
+      KVM_STATE_DIR: /kvm-state
+      KVM_PROXY_PORT: "43128"
+      KVM_PROXY_BRIDGE: /usr/local/bin/kvm-proxy-bridge
+      SCHEDULER_STATE_DIR: /scheduler
+      HOST_MAX_EPHEMERAL: ${HOST_MAX_EPHEMERAL:-12}
+      LEGACY_RESERVED_RUNNERS: ${LEGACY_RESERVED_RUNNERS:-11}
+      HOST_MEMORY_RESERVE_MB: ${HOST_MEMORY_RESERVE_MB:-3072}
+      GITHUB_HTTP_TIMEOUT_SECONDS: "15"
+    cpus: 2.25
+    mem_limit: 5120m
+    memswap_limit: 8192m
+    pids_limit: 1024
+    devices:
+      - /dev/kvm:/dev/kvm:rwm
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=64m
+    volumes:
+      - ${KVM_GOLDEN_HOST_DIR:-/var/lib/recursive-coder-kvm/golden}:/golden:ro
+      - ${KVM_STATE_HOST_DIR:-/var/lib/recursive-coder-kvm/state}:/kvm-state
+      - runner-scheduler:/scheduler
+
+volumes:
+  runner-scheduler:
+    external: true
+    name: social-mcp-runner-scheduler

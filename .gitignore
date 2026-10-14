@@ -1,0 +1,21 @@
+# No credentials, runtime data, VM disks, forensic logs or artifacts in Git.
+.env
+.env.*
+!.env.example
+*.qcow2
+*.img
+*.iso
+*.seed
+*.log
+*.jsonl
+*.tar
+*.gz
+*.zip
+state/
+golden/
+evidence/
+diagnostics/
+__pycache__/
+.pytest_cache/
+*.pyc
+.DS_Store

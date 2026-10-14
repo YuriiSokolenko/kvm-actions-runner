@@ -1,0 +1,46 @@
+name: Standalone KVM runner checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    # Hosted only: never execute untrusted PR code on privileged N150 hardware.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python syntax and deterministic tests
+        run: |
+          python3 -m compileall -q admission.py host_probe.py github_api.py manager.py kvm-backend.py kvm-egress-proxy.py kvm_deploy_policy.py
+          python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Bash syntax and imported offline regression suites
+        run: |
+          set -euo pipefail
+          for script in scripts/*.sh tests/test_*.sh; do bash -n "$script"; done
+          bash tests/test_build_recursive_coder_kvm_golden.sh
+          bash tests/test_prepare_recursive_coder_kvm.sh
+          bash tests/test_recursive_coder_kvm_builder_tool.sh
+      - name: Compose service and external admission lock policy
+        env:
+          RECURSIVE_CODER_GH_ADMIN_TOKEN: dummy-ci-token-no-privileges
+        run: |
+          docker compose -f compose.yaml config --quiet
+          docker compose -f compose.yaml config --format json > /tmp/kvm-compose.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path('/tmp/kvm-compose.json').read_text())
+          assert list(data['services']) == ['kvm-runner-manager']
+          assert len(data['volumes']) == 1
+          assert data['volumes']['runner-scheduler']['external'] is True
+          assert data['volumes']['runner-scheduler']['name'] == 'social-mcp-runner-scheduler'
+          service=data['services']['kvm-runner-manager']
+          assert service['mem_limit'] == 5368709120
+          assert service['pids_limit'] == 1024
+          assert service['environment']['GITHUB_REPOSITORY'] == 'YuriiSokolenko/recursive-coder'
+          assert '/var/run/docker.sock' not in str(service)
+          PY

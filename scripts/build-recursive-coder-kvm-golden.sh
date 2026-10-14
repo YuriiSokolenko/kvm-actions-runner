@@ -65,7 +65,7 @@ check_host(){
   local m; m="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
   [[ "$m" =~ ^[0-9]+$ ]] && ((m >= 8*1024*1024)) || fail 'requires 8 GiB available RAM'
   for c in qemu-img qemu-system-x86_64 nc python3 sha256sum install stat df awk flock timeout; do command -v "$c" >/dev/null || fail "missing tool $c"; done
-  [[ -r "$dir/kvm-egress-proxy.py" ]] || fail 'allowlist proxy missing'
+  [[ -r "$dir/../kvm-egress-proxy.py" ]] || fail 'allowlist proxy missing'
 }
 check_base(){
   [[ -f "$base" && ! -L "$base" && -r "$base" ]] || fail 'stock image must be a readable regular non-symlink file'
@@ -161,7 +161,7 @@ s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()
 PY
 )"
  printf '#!/bin/sh\nexec /usr/bin/nc -N 127.0.0.1 %s\n' "$port" >"$tmp/proxy-bridge"; chmod 0700 "$tmp/proxy-bridge"
- python3 "$dir/kvm-egress-proxy.py" "$port" >"$tmp/proxy.log" 2>&1 & proxy_pid=$!
+ python3 "$dir/../kvm-egress-proxy.py" "$port" >"$tmp/proxy.log" 2>&1 & proxy_pid=$!
  for _ in $(seq 1 50); do grep -q '^listening=' "$tmp/proxy.log" && break; sleep .1; done
  grep -q '^listening=' "$tmp/proxy.log" || fail 'allowlist proxy failed'
  format="$(qemu-img info --output=json -- "$base" | python3 -c 'import json,sys;print(json.load(sys.stdin)["format"])')"
