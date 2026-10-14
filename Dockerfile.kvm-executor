@@ -1,0 +1,18 @@
+FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates coreutils qemu-system-x86 qemu-utils xorriso util-linux \
+    && rm -rf /var/lib/apt/lists/*
+COPY infra/github-runner-autoscaler/kvm-backend.py /usr/local/bin/kvm-backend.py
+COPY infra/github-runner-autoscaler/kvm-egress-proxy.py /usr/local/bin/kvm-egress-proxy.py
+COPY infra/github-runner-autoscaler/kvm-proxy-bridge /usr/local/bin/kvm-proxy-bridge
+COPY scripts/kvm-executor-entrypoint.sh /usr/local/bin/kvm-executor-entrypoint
+COPY n150_runner /app/n150_runner
+COPY config/pools.json /etc/n150/pools.json
+RUN chmod 0755 /usr/local/bin/kvm-backend.py /usr/local/bin/kvm-proxy-bridge /usr/local/bin/kvm-executor-entrypoint
+ENV PYTHONPATH=/app PYTHONDONTWRITEBYTECODE=1 MANAGER_CONFIG=/etc/n150/pools.json \
+    KVM_BACKEND_SCRIPT=/usr/local/bin/kvm-backend.py \
+    KVM_STATE_DIR=/kvm-state KVM_GOLDEN_IMAGE=/golden/noble-server-cloudimg-amd64-prepared-9fc0ce202ba8.img \
+    KVM_GOLDEN_SHA256=9fc0ce202ba8def25b126323af21d5a5bb0fb8903cb7367f2fc246ae568e1706 \
+    KVM_GUEST_CPUS=2 KVM_GUEST_MEMORY_MB=4096 KVM_OVERLAY_MAX_GIB=24 \
+    KVM_MAX_LIFETIME_SECONDS=1800 KVM_PROXY_PORT=43128 KVM_PROXY_BRIDGE=/usr/local/bin/kvm-proxy-bridge
+CMD ["/usr/local/bin/kvm-executor-entrypoint"]
