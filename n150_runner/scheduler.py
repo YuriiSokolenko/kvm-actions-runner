@@ -93,6 +93,12 @@ class Journal:
         self.entries[name] = Pending(pool.id, name, now)
         self.persist()
 
+    def release(self, name: str) -> None:
+        """Forget a *definitively rejected* launch; unknown outcomes stay reserved."""
+        if name in self.entries:
+            del self.entries[name]
+            self.persist()
+
     def reconcile(self, active_names: set[str], now: float) -> None:
         before = len(self.entries)
         # Keep unknown launches reserved for a bounded grace period. A crash
@@ -165,10 +171,22 @@ class Scheduler:
             report("backend_started", pool=pool.id, backend=pool.backend)
             return True
         except (BackendError, GitHubError) as err:
+            # A completed rejection is safe to retry after backoff. A timeout,
+            # transport loss, truncated reply or executor crash may instead
+            # have launched a worker: keep its reservation until reconciliation.
+            outcome_unknown = isinstance(err, BackendError) and err.code in {
+                "BACKEND_UNAVAILABLE", "BACKEND_CONNECTION_CLOSED",
+                "BACKEND_RESPONSE_TOO_LARGE", "BACKEND_INVALID_RESPONSE",
+                "BACKEND_REJECTED", "EXECUTOR_TIMEOUT",
+                "EXECUTOR_RESPONSE_TOO_LARGE", "EXECUTOR_INTERNAL_ERROR",
+            }
+            if not outcome_unknown:
+                self.journal.release(name)
             self.failures[pool.id] = min(self.failures[pool.id] + 1, 6)
             delay = min(300, 5 * 2 ** (self.failures[pool.id] - 1))
             self.retry_after[pool.id] = now + delay
-            report("backend_start_failed", pool=pool.id, reason=err.code, retry_seconds=delay)
+            report("backend_start_failed", pool=pool.id, reason=err.code,
+                   retry_seconds=delay, outcome_unknown=outcome_unknown)
             return False
 
     def _cleanup(self, workers: list[Worker], runners: dict[str, dict[str, Runner]],
@@ -269,8 +287,17 @@ class Scheduler:
                     metrics = replace(metrics, mem_available_mb=metrics.mem_available_mb - control.memory_mb)
             else:
                 self._deny(control, reason, now)
-        if counts[control.id] < 1:
-            # Reserve Control capacity first; no opportunistic ephemeral starts.
+        # A reservation is not a healthy Control runner. The persistent worker
+        # must be visible in the executor AND online on GitHub before scheduling
+        # any ephemeral job. This also protects unknown launch outcomes.
+        control_registration = runners[control.repository].get(control.runner_name)
+        control_ready = (
+            any(w.pool == control.id and w.running and w.name == control.runner_name
+                for w in workers)
+            and control_registration is not None
+            and control_registration.status == "online"
+        )
+        if not control_ready:
             report("control_unavailable", reason="CONTROL_NOT_READY")
             return
         pi_active = sum(counts[p.id] for p in pools if p.model_gated)

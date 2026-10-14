@@ -18,6 +18,7 @@ class FakeExecutors:
         self.workers = []
         self.started = []
         self.failed_pool = None
+        self.fail_reason = "EXECUTOR_COMMAND_FAILED"
         self.hide_started = False
 
     def __call__(self, backend, request):
@@ -39,7 +40,7 @@ class FakeExecutors:
         if cmd == "start":
             self.started.append(request["pool"])
             if self.failed_pool == request["pool"]:
-                raise BackendError("EXECUTOR_COMMAND_FAILED")
+                raise BackendError(self.fail_reason)
             if not self.hide_started:
                 self.workers.append({"name": request["name"], "pool": request["pool"],
                                      "backend": backend, "running": True})
@@ -109,7 +110,9 @@ class SchedulerTest(unittest.TestCase):
         self.demand("general", 2)
         self.demand("recursive-coder-kvm", 2)
         self.tick()
-        self.assertEqual("control", self.executor.started[0])
+        self.assertEqual(["control"], self.executor.started)
+        # First observe Control running and registered; only then admit jobs.
+        self.tick()
         self.assertLessEqual(self.executor.started.count("recursive-coder-kvm"), 1)
         self.assertLessEqual(len([w for w in self.executor.workers if w["pool"] != "control"]), 6)
         self.assertGreater(len(self.executor.started), 1)
@@ -123,18 +126,17 @@ class SchedulerTest(unittest.TestCase):
         self.tick()
         self.assertEqual(1, self.executor.started.count("recursive-coder-kvm"))
 
-    def test_failed_launch_backoff_and_durable_reservation(self):
+    def test_definite_general_failure_releases_journal_and_respects_backoff(self):
         self.demand("general", 1)
         self.executor.failed_pool = "general"
-        self.tick()
+        self.tick()  # Control starts, but jobs are blocked until it is online.
+        self.tick(seconds=1)  # General backend definitely rejects its launch.
         self.assertEqual(1, self.executor.started.count("general"))
-        self.tick()
+        self.assertFalse(any(e.pool == "general" for e in self.scheduler.journal.entries.values()))
+        self.tick(seconds=1)  # Still inside 5-second backoff.
         self.assertEqual(1, self.executor.started.count("general"))
-        self.assertTrue(any(item.pool == "general" for item in self.scheduler.journal.entries.values()))
-        # Reservation never disappears just because the executor briefly
-        # returned an error. On expiry, the next poll may make progress.
         self.executor.failed_pool = None
-        self.now += 181
+        self.now += 5
         self.tick()
         self.assertEqual(2, self.executor.started.count("general"))
 
@@ -142,19 +144,66 @@ class SchedulerTest(unittest.TestCase):
         self.demand("pi", 1)
         self.executor.hide_started = True
         self.tick()
-        self.assertEqual(["control", "pi"], self.executor.started)
-        # Both launches are durably reserved even before backend visibility.
-        # A repeated poll cannot start either a second Control or Pi worker.
+        self.assertEqual(["control"], self.executor.started)
+        self.assertIn("n150-control", self.scheduler.journal.entries)
+        # The reservation protects against double start but never grants
+        # ephemeral admissions without a visible, online Control runner.
         self.tick()
-        self.assertEqual(1, self.executor.started.count("control"))
+        self.assertEqual(["control"], self.executor.started)
+        self.executor.hide_started = False
+        self.now += 181
+        self.tick()  # Unknown Control outcome expires and is retried.
+        self.assertEqual(2, self.executor.started.count("control"))
+        self.tick()  # Observe running Control, then launch the queued Pi job.
         self.assertEqual(1, self.executor.started.count("pi"))
-        self.assertEqual(2, len(self.scheduler.journal.entries))
+
+    def test_definite_control_failure_never_opens_ephemeral_lanes(self):
+        self.demand("pi", 1)
+        self.executor.failed_pool = "control"
+        self.tick(seconds=1)
+        self.assertEqual(["control"], self.executor.started)
+        self.assertNotIn("n150-control", self.scheduler.journal.entries)
+        self.tick(seconds=1)  # Backoff, still no Control.
+        self.assertEqual(["control"], self.executor.started)
+        self.executor.failed_pool = None
+        self.now += 5
+        self.tick()  # Retry must happen without waiting 180 seconds.
+        self.assertEqual(2, self.executor.started.count("control"))
+        self.assertNotIn("pi", self.executor.started)
+        self.tick()  # A healthy Control is observed.
+        self.assertIn("pi", self.executor.started)
+
+    def test_definite_kvm_failure_retries_without_journal_expiry(self):
+        self.demand("recursive-coder-kvm", 1)
+        self.tick()
+        self.executor.failed_pool = "recursive-coder-kvm"
+        self.tick(seconds=1)
+        self.assertEqual(1, self.executor.started.count("recursive-coder-kvm"))
+        self.assertFalse(any(e.pool == "recursive-coder-kvm" for e in self.scheduler.journal.entries.values()))
+        self.executor.failed_pool = None
+        self.tick(seconds=10)
+        self.assertEqual(1, self.executor.started.count("recursive-coder-kvm"))
+        self.tick()
+        self.assertEqual(2, self.executor.started.count("recursive-coder-kvm"))
+
+    def test_unknown_timeout_retains_reservation_without_bypassing_control(self):
+        self.demand("general", 1)
+        self.executor.failed_pool = "control"
+        self.executor.fail_reason = "EXECUTOR_TIMEOUT"
+        self.tick()
+        self.assertIn("n150-control", self.scheduler.journal.entries)
+        self.assertEqual(["control"], self.executor.started)
+        self.executor.failed_pool = None
+        self.tick()
+        self.assertEqual(["control"], self.executor.started)
+        self.assertNotIn("general", self.executor.started)
 
     def test_unknown_busy_registration_reserves_a_global_slot(self):
         self.demand("general", 3)
         api = self.clients["YuriiSokolenko/social-mcp"]
         api.extra_runners = [Runner(999, "n150-gen-eph-remote-busy", True, "online")]
-        self.tick()
+        self.tick()  # Control launch
+        self.tick()  # Control online; evaluate demand
         # Three desired minus one busy-but-unseen registration: only two
         # launches can be admitted even if Docker reports no such worker.
         self.assertEqual(2, self.executor.started.count("general"))
