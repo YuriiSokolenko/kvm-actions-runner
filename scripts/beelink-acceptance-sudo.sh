@@ -177,6 +177,26 @@ check_config_and_credentials() {
   [[ "$(need_env_key SOCIAL_MCP_GH_TOKEN)" == yes ]] || die "SOCIAL_MCP_GH_TOKEN is missing or empty in ${ENV_FILE}."
   [[ "$(need_env_key RECURSIVE_CODER_GH_TOKEN)" == yes ]] || die "RECURSIVE_CODER_GH_TOKEN is missing or empty in ${ENV_FILE}."
   [[ "$(need_env_key MODEL_STATUS_URL)" == yes ]] || die "MODEL_STATUS_URL is missing or empty in ${ENV_FILE}; Pi admission must use the host model endpoint."
+  local model_probe
+  model_probe="$(python3 - "$ENV_FILE" <<'PY'
+import pathlib, sys, urllib.error, urllib.request
+url = ""
+for line in pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+    key, sep, value = line.partition("=")
+    if sep and key.strip() == "MODEL_STATUS_URL":
+        url = value.strip().strip("\"'")
+        break
+try:
+    with urllib.request.urlopen(url, timeout=8) as response:
+        response.read(1)
+        print("HTTP " + str(response.status))
+except urllib.error.HTTPError as error:
+    print("HTTP " + str(error.code))
+except Exception as error:
+    print("unreachable (" + type(error).__name__ + ")")
+PY
+  )"
+  [[ "$model_probe" == HTTP\ 2* ]] || die "Pi model metrics endpoint is unavailable (${model_probe}); restore it before cutover so model-gated scheduling can be validated."
   python3 - "$ENV_FILE" <<'PY' || die "repository tokens must be distinct values in ${ENV_FILE}."
 import pathlib, sys
 values = {}
@@ -211,7 +231,7 @@ PY
   [[ -d "$pi_config" ]] || die "Pi configuration directory is missing: ${pi_config}."
   [[ -d "$kvm_state" ]] || die "KVM state directory is missing: ${kvm_state}."
   compose config --quiet || die "Compose configuration is invalid."
-  log "New Compose configuration, required credential presence, distinct repository tokens, and bind paths: PASS (secret values redacted)."
+  log "New Compose configuration, required credential presence, distinct repository tokens, model endpoint (${model_probe}), and bind paths: PASS (secret values redacted)."
 }
 
 check_volumes() {
