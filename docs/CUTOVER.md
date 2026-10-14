@@ -1,5 +1,21 @@
 # One coordinated N150 cutover and rollback (downtime allowed)
 
+## Current Beelink acceptance status (2026-10-15)
+
+The Beelink offline preflight found the Pi model endpoint
+`http://192.168.8.210:3009/metrics` unreachable. **The HP Nano hosting
+this endpoint was intentionally powered off**, as confirmed by the owner.
+This is an expected external dependency being offline, **not evidence of a
+Beelink network, scheduler, or model-server defect**. Do not attempt to
+repair networking or relax model-capacity admission based on this result.
+
+The offline Beelink suite passed (52 tests), Docker/Compose and KVM were
+available, and the pinned Golden Image checksum matched. The coordinated
+cutover and real four-pool acceptance were **not run**. Leave legacy managers
+running. When HP Nano is powered on, verify the endpoint and rerun
+`sudo bash scripts/beelink-acceptance-sudo.sh --preflight` before considering
+`--apply`; no deployment approval is implied by this note.
+
 No no-downtime migration, rolling manager handoff or second authority.
 This is a manual operator procedure requiring explicit owner approval.
 
