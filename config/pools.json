@@ -54,7 +54,8 @@
         "pi-pr-fix.yml",
         "pi-dispatcher.yml",
         "pi-architect.yml",
-        "pi-triage.yml"
+        "pi-triage.yml",
+        "verify-run-check-beelink.yml"
       ],
       "events": [
         "push",

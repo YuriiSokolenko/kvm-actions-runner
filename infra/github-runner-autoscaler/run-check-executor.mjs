@@ -484,7 +484,11 @@ export function startServer() {
     }
   }
   const server = createServer();
-  server.listen(PORT, '0.0.0.0', () => process.stdout.write(`RUN_CHECK_EXECUTOR listening port=${PORT} image=${IMAGE}\n`));
+  // An isolated bridge service used to publish this port only on host loopback.
+  // Our unified Compose uses host networking: never expose the executor to LAN.
+  const host = process.env.RUN_CHECK_EXECUTOR_BIND || '127.0.0.1';
+  if (host !== '127.0.0.1') throw new Error('RUN_CHECK_EXECUTOR_BIND must remain loopback-only');
+  server.listen(PORT, host, () => process.stdout.write(`RUN_CHECK_EXECUTOR listening port=${PORT} image=${IMAGE}\n`));
   return server;
 }
 

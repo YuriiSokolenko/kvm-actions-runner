@@ -83,6 +83,7 @@ services:
       RUN_CHECK_SANDBOX_IMAGE: ${RUN_CHECK_SANDBOX_IMAGE:-n150/run-check-sandbox:0.1.4}
       RUN_CHECK_STAGE_VOLUME: ${RUN_CHECK_STAGE_VOLUME:-social-mcp-run-check-stage}
       RUN_CHECK_EXECUTOR_PORT: "17343"
+      RUN_CHECK_EXECUTOR_BIND: "127.0.0.1"
     cpus: 0.50
     mem_limit: 512m
     cap_drop: [ALL]
