@@ -19,7 +19,12 @@ fi
 printf 'untrusted fixture image\n' >"$tmp/wrong.img"
 preflight_root="$tmp/preflight-root"
 preflight_script="$tmp/prepare-preflight.sh"
-sed "s|^root=/var/lib/recursive-coder-kvm$|root=$preflight_root|" "$script" >"$preflight_script"
+# Exercise the original production script with host-only checks removed
+# solely in the TEST COPY; CI has no /dev/kvm or QEMU installation.
+grep -Fxq 'check_host' "$script" || fail 'production host safety check missing'
+grep -Fxq 'require_commands' "$script" || fail 'production tool safety check missing'
+sed -e "s|^root=/var/lib/recursive-coder-kvm$|root=$preflight_root|" \
+  -e '/^check_host$/d' -e '/^require_commands$/d' "$script" >"$preflight_script"
 chmod 0755 "$preflight_script"
 if KVM_STAGING_IMAGE="$tmp/wrong.img" bash "$preflight_script" --dry-run >"$tmp/output" 2>&1; then
   fail 'dry-run accepted an image with the wrong pinned checksum'
@@ -42,6 +47,7 @@ printf 'locally supplied test image\n' >"$fixture"
 fixture_sha="$(sha256sum "$fixture" | awk '{print $1}')"
 sed -e "s|^root=/var/lib/recursive-coder-kvm$|root=$test_root/host-root|" \
   -e "s|^expected_sha=.*$|expected_sha=$fixture_sha|" \
+  -e '/^check_host$/d' -e '/^require_commands$/d' \
   "$script" >"$test_root/prepare.sh"
 chmod 0755 "$test_root/prepare.sh"
 cat >"$test_root/bin/id" <<'SH'
