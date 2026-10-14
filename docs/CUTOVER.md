@@ -66,3 +66,19 @@ before serving VM launches. Do not rebuild a production Golden Image.
    Record the blocker and retained evidence.
 
 Upstream source cleanup happens only after full production acceptance.
+
+## Persistent Control image and configuration upgrades
+
+Control is **persistent**, unlike disposable Pi/General workers. Rebuilding or
+retagging the Control image does not upgrade an existing container: Docker
+keeps its original image ID and environment. The Docker executor now checks
+the image ID, resource constraints, runner labels, restart policy and mounted
+Control state before restarting a stopped Control container; mismatches fail
+with CONTROL_CONFIG_DRIFT instead of silently starting stale configuration.
+
+During an approved maintenance window: wait for a Control job to finish,
+stop the scheduler, inspect and record the running Control image/volumes, stop
+and remove **only the n150-control container**, rebuild or pull the target
+pinned image, then restart the scheduler. Preserve the named
+social-mcp-control-runner-state volume and all repair cooldown records.
+Do **not** delete or recreate the Control state volume to resolve drift.

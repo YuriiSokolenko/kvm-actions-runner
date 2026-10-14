@@ -77,8 +77,77 @@ class DockerExecutor:
                      "-v", volume + ":/evidence", pool.runner_image, "1777", "/evidence", timeout=45)
         self.evidence_initialized = True
 
+    def _verify_control_container(self, pool: Pool, name: str, state: str) -> None:
+        """Reject stale persistent Control configuration; never recreate automatically."""
+        desired_image_id = self._docker(
+            "image", "inspect", "--format", "{{.Id}}", pool.runner_image
+        ).strip()
+        try:
+            inspected = json.loads(self._docker("inspect", name))
+        except (ValueError, TypeError):
+            raise ExecutorError("CONTROL_INSPECT_INVALID") from None
+        if not isinstance(inspected, list) or len(inspected) != 1 or not isinstance(inspected[0], dict):
+            raise ExecutorError("CONTROL_INSPECT_INVALID")
+        container = inspected[0]
+        config = container.get("Config") or {}
+        host = container.get("HostConfig") or {}
+        labels = config.get("Labels") or {}
+        env = config.get("Env") or []
+        mount = container.get("Mounts") or []
+        required_env = {
+            "RUNNER_NAME=" + name,
+            "RUNNER_LABELS=" + ",".join(pool.labels),
+            "GITHUB_REPOSITORY=" + pool.repository,
+        }
+        expected_labels = {
+            "n150-manager.managed": "true",
+            "n150-manager.pool": pool.id,
+            "social-mcp.runner-repository": pool.repository,
+            "social-mcp.runner-pool": pool.runner_name,
+        }
+        caps = host.get("CapAdd") or []
+        security = host.get("SecurityOpt") or []
+        state_mounted = any(
+            isinstance(m, dict)
+            and m.get("Type") == "volume"
+            and m.get("Name") == state
+            and m.get("Destination") == "/home/runner/actions-runner"
+            for m in mount
+        )
+        if (
+            not desired_image_id.startswith("sha256:")
+            or container.get("Image") != desired_image_id
+            or not isinstance(labels, dict)
+            or any(labels.get(key) != value for key, value in expected_labels.items())
+            or not isinstance(env, list)
+            or not required_env.issubset(set(env))
+            or host.get("NetworkMode") != pool.network
+            or host.get("Memory") != pool.memory_mb * 1024 * 1024
+            or host.get("NanoCpus") != int(pool.cpus * 1_000_000_000)
+            or (host.get("RestartPolicy") or {}).get("Name") != "unless-stopped"
+            or not {"SETUID", "SETGID", "KILL"}.issubset(set(caps))
+            or not any("no-new-privileges" in option for option in security)
+            or not state_mounted
+        ):
+            raise ExecutorError("CONTROL_CONFIG_DRIFT")
+
     def start(self, pool: Pool, name: str, token: str) -> None:
-        if any(w["name"] == name and w["running"] for w in self.list()):
+        # An existing persistent worker must not silently retain an outdated
+        # image, labels, state mount or resource limits after a configuration bump.
+        # No live Control container is auto-removed and no volume is modified.
+        existing_workers = [w for w in self.list() if w["name"] == name]
+        if pool.mode == "persistent":
+            if not TOKEN.fullmatch(token):
+                raise ExecutorError("INVALID_CONTROL_TOKEN")
+            state = os.environ.get("CONTROL_STATE_VOLUME", "social-mcp-control-runner-state")
+            if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", state):
+                raise ExecutorError("INVALID_CONTROL_STATE_VOLUME")
+            if existing_workers:
+                self._verify_control_container(pool, name, state)
+                if not existing_workers[0]["running"]:
+                    self._docker("start", name)
+                return
+        elif any(w["running"] for w in existing_workers):
             return
         args = ["run", "-d", "--name", name,
                 "--label", "n150-manager.managed=true",
@@ -98,16 +167,10 @@ class DockerExecutor:
         if pool.mode == "persistent":
             if not TOKEN.fullmatch(token):
                 raise ExecutorError("INVALID_CONTROL_TOKEN")
-            # Preserve the original independently scoped persistent Control
-            # worker and state; do not allocate a second autoscaler or runner.
-            existing = [w for w in self.list() if w["name"] == name]
-            if existing:
-                self._docker("start", name)
-                return
+            # Never rotate or recreate Control automatically. The operator
+            # must explicitly recreate the container while preserving its
+            # named state volume when image/config/token changes.
             env["GH_ADMIN_TOKEN"] = token
-            state = os.environ.get("CONTROL_STATE_VOLUME", "social-mcp-control-runner-state")
-            if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", state):
-                raise ExecutorError("INVALID_CONTROL_STATE_VOLUME")
             args += ["--restart", "unless-stopped", "--cap-add", "SETUID",
                      "--cap-add", "SETGID", "--cap-add", "KILL",
                      "-v", state + ":/home/runner/actions-runner", "-e", "GH_ADMIN_TOKEN"]

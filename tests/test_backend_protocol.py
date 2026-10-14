@@ -31,6 +31,26 @@ class DockerExecutorTest(unittest.TestCase):
         self.assertNotIn("test_token_12345678901234567890", " ".join(worker_args))
         self.assertTrue(any("RUNNER_TOKEN" in env for args, env in self.calls))
 
+    def test_stale_control_image_is_not_silently_started(self):
+        commands = []
+
+        def fake_docker(*args, token="", env=None, timeout=35):
+            commands.append(args)
+            if args[0] == "ps":
+                return "n150-control\\texited\\tcontrol\\n".replace("\\t", "\t").replace("\\n", "\n")
+            if args[:2] == ("image", "inspect"):
+                return "sha256:updated-image"
+            if args[0] == "inspect":
+                return '{"Image":"sha256:old-image","Config":{},"HostConfig":{},"Mounts":[]}'
+            raise AssertionError(args)
+
+        self.executor._docker = fake_docker
+        with self.assertRaises(ExecutorError) as error:
+            self.executor.start(POOLS["control"], "n150-control",
+                                "github_pat_admin_1234567890123456789")
+        self.assertEqual("CONTROL_CONFIG_DRIFT", error.exception.code)
+        self.assertFalse(any(args[0] in ("run", "start", "rm") for args in commands))
+
     def test_recovery_only_removes_exited_ephemeral_containers(self):
         commands = []
 

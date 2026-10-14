@@ -35,3 +35,19 @@ and filesystem ACLs require host review before production acceptance.
 Diagnostics expose only reason codes and numeric counts. Never log GitHub
 registration tokens, PATs, VM cloud-init payloads, secrets, raw API response
 bodies, backend stderr, personal paths or unsanitized logs.
+
+The General evidence-volume preparation deliberately performs chmod 1777
+using a short-lived root process in a trusted image so ephemeral jobs can
+append records. Treat that named volume as shared, not as an isolation
+mechanism; never publish evidence contents as credentials.
+
+Before cutover, verify permissions and ownership of both local executor
+Unix sockets and the Docker socket on N150. A process that can reach a
+backend socket can request pool-scoped operations; its filesystem access
+must therefore be restricted to the scheduler and corresponding executor.
+The 2 Docker-socket holders must never expose that socket to Pi/KVM workers.
+
+The General lane's configured workflow_run consumers are pi-reconcile.yml
+and pi-usage.yml: both run scripts from trusted dev (checked 2026-10-15).
+All new workflow_run paths or checkout-ref changes must receive a security
+review before enabling the corresponding runner pool.
