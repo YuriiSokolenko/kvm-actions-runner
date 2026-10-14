@@ -1,0 +1,2 @@
+#!/bin/sh
+exec nc -N 127.0.0.1 "${KVM_PROXY_PORT:-43128}"
