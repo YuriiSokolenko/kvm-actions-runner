@@ -32,7 +32,8 @@ class Runner:
 
 class GitHub:
     def __init__(self, repository: str, token: str, *, timeout: int = 12,
-                 opener=None, sleep=time.sleep):
+                 opener=None, sleep=time.sleep, clock=time.monotonic,
+                 demand_cache_seconds: int = 30):
         if not token:
             raise GitHubError("GITHUB_TOKEN_MISSING")
         self.repository = repository
@@ -40,11 +41,19 @@ class GitHub:
         self.timeout = timeout
         self.opener = opener or urllib.request.urlopen
         self.sleep = sleep
+        self.clock = clock
+        if type(demand_cache_seconds) is not int or not 10 <= demand_cache_seconds <= 300:
+            raise ValueError("invalid demand cache duration")
+        self.demand_cache_seconds = demand_cache_seconds
+        self._demand_cache = None
+        self.rate_limited_until = 0.0
         self.url = "https://api.github.com/repos/" + repository
 
     def _request(self, path: str, *, method: str = "GET") -> object:
         if not path.startswith("/") or path.startswith("//"):
             raise GitHubError("GITHUB_INVALID_PATH")
+        if self.clock() < self.rate_limited_until:
+            raise GitHubError("GITHUB_RATE_LIMIT")
         request = urllib.request.Request(self.url + path, method=method,
              headers={
                 "Authorization": "Bearer " + self.token,
@@ -76,6 +85,12 @@ class GitHub:
                         delay = 2 ** attempt
                     self.sleep(delay)
                     continue
+                if retryable:
+                    # A rate-limited credential must not hammer GitHub on
+                    # every scheduler poll, even for separate API endpoints.
+                    self.rate_limited_until = max(
+                        self.rate_limited_until, self.clock() + 60
+                    )
                 raise GitHubError("GITHUB_RATE_LIMIT" if retryable else "GITHUB_HTTP_ERROR") from None
             except (TimeoutError, urllib.error.URLError, OSError):
                 if attempt < 2:
@@ -139,6 +154,11 @@ class GitHub:
         demand = {p.id: 0 for p in pool_list}
         if not pool_list:
             return demand
+        key = tuple(sorted((p.id, p.workflows, p.events, p.labels) for p in pool_list))
+        if self._demand_cache is not None:
+            expiry, cached_key, cached_counts = self._demand_cache
+            if cached_key == key and self.clock() < expiry:
+                return dict(cached_counts)
         runs = {}
         for status in ("queued", "pending", "in_progress"):
             for run in self._list("/actions/runs?status=" + status, "workflow_runs"):
@@ -169,4 +189,9 @@ class GitHub:
                     supported = {"self-hosted", "linux", "x64"} | {v.lower() for v in pool.labels}
                     if labels_lower == supported:
                         demand[pool.id] += 1
+        # Cache only complete, validated snapshots. Never reuse partial
+        # GitHub results after an error. Empty queues are sampled less often
+        # to conserve REST quota when the host is idle.
+        ttl = 60 if not any(demand.values()) else self.demand_cache_seconds
+        self._demand_cache = (self.clock() + ttl, key, dict(demand))
         return demand

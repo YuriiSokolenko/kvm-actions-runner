@@ -70,6 +70,30 @@ class GitHubDiscoveryTest(unittest.TestCase):
         self.assertEqual({"pi": 1, "general": 1}, counts)
         self.assertGreaterEqual(len(fixture.calls), 3)
 
+    def test_demand_cache_reduces_requests_and_expires(self):
+        fixture = FixtureAPI()
+        clock = [100.0]
+        client = GitHub("YuriiSokolenko/social-mcp", "test-token",
+                        opener=fixture, clock=lambda: clock[0],
+                        demand_cache_seconds=30)
+        expected = {"pi": 1, "general": 1}
+        self.assertEqual(expected, client.queued_jobs_by_pool([PI, GENERAL]))
+        initial_calls = len(fixture.calls)
+        self.assertGreater(initial_calls, 3)
+        clock[0] += 10
+        self.assertEqual(expected, client.queued_jobs_by_pool([PI, GENERAL]))
+        self.assertEqual(initial_calls, len(fixture.calls))
+        clock[0] += 21
+        self.assertEqual(expected, client.queued_jobs_by_pool([PI, GENERAL]))
+        self.assertGreater(len(fixture.calls), initial_calls)
+
+    def test_cached_demand_is_not_exposed_to_mutation(self):
+        fixture = FixtureAPI()
+        client = GitHub("YuriiSokolenko/social-mcp", "test-token", opener=fixture)
+        first = client.queued_jobs_by_pool([PI, GENERAL])
+        first["pi"] = 1000
+        self.assertEqual(1, client.queued_jobs_by_pool([PI, GENERAL])["pi"])
+
     def test_partial_pages_rejected_without_partial_demand(self):
         fixture = FixtureAPI()
         fixture.invalid = True
