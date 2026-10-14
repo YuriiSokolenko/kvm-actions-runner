@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+coverage/
+*.qcow2
+*.img
+*.iso
+*.log
+state/
+evidence/

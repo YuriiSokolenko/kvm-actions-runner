@@ -1,0 +1,7 @@
+FROM docker:29.9.0-cli@sha256:1a4c7cb63513f349bdad01fcc6e0f3f2f67d37b9da86f14dc0d4a0942eecda00
+RUN apk add --no-cache python3 ca-certificates
+ENV PYTHONPATH=/app PYTHONDONTWRITEBYTECODE=1 MANAGER_CONFIG=/etc/n150/pools.json
+WORKDIR /app
+COPY n150_runner /app/n150_runner
+COPY config/pools.json /etc/n150/pools.json
+CMD ["python3", "-m", "n150_runner.executor", "docker"]

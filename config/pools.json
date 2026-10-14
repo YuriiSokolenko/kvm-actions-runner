@@ -1,0 +1,152 @@
+{
+  "poll_seconds": 10,
+  "state_dir": "/state",
+  "socket_dir": "/run/n150",
+  "host": {
+    "max_ephemeral": 6,
+    "memory_reserve_mb": 3072,
+    "cpu_reserve": 1,
+    "cpu_overcommit": 2,
+    "kvm_cpu_headroom": 1,
+    "model_max_concurrency": 8,
+    "model_status_url_env": "MODEL_STATUS_URL"
+  },
+  "pools": [
+    {
+      "id": "control",
+      "repository": "YuriiSokolenko/social-mcp",
+      "token_env": "SOCIAL_MCP_GH_TOKEN",
+      "backend": "docker",
+      "mode": "persistent",
+      "labels": [
+        "n150",
+        "control"
+      ],
+      "workflows": [],
+      "events": [],
+      "runner_prefix": "",
+      "runner_name": "n150-control",
+      "runner_image": "n150/github-control-runner:0.1.8",
+      "max_runners": 1,
+      "priority": 1000,
+      "weight": 1,
+      "cpus": 1,
+      "memory_mb": 1024,
+      "network": "bridge",
+      "mount_pi_config": false,
+      "mount_docker_socket": false,
+      "model_gated": false,
+      "idle_polls": 2
+    },
+    {
+      "id": "pi",
+      "repository": "YuriiSokolenko/social-mcp",
+      "token_env": "SOCIAL_MCP_GH_TOKEN",
+      "backend": "docker",
+      "mode": "ephemeral",
+      "labels": [
+        "n150",
+        "pi-agent"
+      ],
+      "workflows": [
+        "pi-issue-agent.yml",
+        "pi-pr-review.yml",
+        "pi-pr-fix.yml",
+        "pi-dispatcher.yml",
+        "pi-architect.yml",
+        "pi-triage.yml",
+        "verify-run-check-beelink.yml"
+      ],
+      "events": [
+        "push",
+        "workflow_dispatch",
+        "schedule",
+        "repository_dispatch",
+        "workflow_run"
+      ],
+      "runner_prefix": "n150-pi-eph",
+      "runner_name": "",
+      "runner_image": "n150/github-pi-runner-ephemeral:1.1.0-mini-swe-r5",
+      "max_runners": 4,
+      "priority": 50,
+      "weight": 2,
+      "cpus": 1.5,
+      "memory_mb": 2048,
+      "network": "host",
+      "mount_pi_config": true,
+      "mount_docker_socket": false,
+      "model_gated": true,
+      "idle_polls": 2
+    },
+    {
+      "id": "general",
+      "repository": "YuriiSokolenko/social-mcp",
+      "token_env": "SOCIAL_MCP_GH_TOKEN",
+      "backend": "docker",
+      "mode": "ephemeral",
+      "labels": [
+        "n150",
+        "general"
+      ],
+      "workflows": [
+        "ci.yml",
+        "pi-auto-merge.yml",
+        "pi-reconcile.yml",
+        "pi-usage.yml"
+      ],
+      "events": [
+        "push",
+        "workflow_dispatch",
+        "schedule",
+        "repository_dispatch",
+        "workflow_run",
+        "pull_request"
+      ],
+      "runner_prefix": "n150-gen-eph",
+      "runner_name": "",
+      "runner_image": "n150/github-general-runner-ephemeral:0.87.11",
+      "max_runners": 3,
+      "priority": 60,
+      "weight": 1,
+      "cpus": 1.5,
+      "memory_mb": 2048,
+      "network": "host",
+      "mount_pi_config": false,
+      "mount_docker_socket": true,
+      "model_gated": false,
+      "idle_polls": 2
+    },
+    {
+      "id": "recursive-coder-kvm",
+      "repository": "YuriiSokolenko/recursive-coder",
+      "token_env": "RECURSIVE_CODER_GH_TOKEN",
+      "backend": "kvm",
+      "mode": "ephemeral",
+      "labels": [
+        "n150",
+        "recursive-coder-ci"
+      ],
+      "workflows": [
+        "ci.yml"
+      ],
+      "events": [
+        "push",
+        "workflow_dispatch",
+        "pull_request"
+      ],
+      "runner_prefix": "n150-rc-eph",
+      "runner_name": "",
+      "runner_image": "",
+      "max_runners": 1,
+      "priority": 70,
+      "weight": 1,
+      "cpus": 2,
+      "memory_mb": 4096,
+      "network": "isolated",
+      "mount_pi_config": false,
+      "mount_docker_socket": false,
+      "model_gated": false,
+      "idle_polls": 4
+    }
+  ]
+}

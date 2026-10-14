@@ -1,0 +1,139 @@
+# Exactly one logical scheduler. Old managers MUST be stopped before deployment.
+services:
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.scheduler
+    image: n150/unified-runner-scheduler:0.1.0
+    restart: unless-stopped
+    init: true
+    network_mode: host
+    environment:
+      SOCIAL_MCP_GH_TOKEN: ${SOCIAL_MCP_GH_TOKEN:-}
+      RECURSIVE_CODER_GH_TOKEN: ${RECURSIVE_CODER_GH_TOKEN:-}
+      MODEL_STATUS_URL: ${MODEL_STATUS_URL:-}
+    cpus: 0.50
+    mem_limit: 256m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=32m"]
+    volumes:
+      - runner-scheduler:/state
+      - executor-ipc:/run/n150
+    depends_on:
+      - docker-executor
+      - kvm-executor
+
+  docker-executor:
+    build:
+      context: .
+      dockerfile: Dockerfile.docker-executor
+    image: n150/unified-docker-executor:0.1.0
+    restart: unless-stopped
+    init: true
+    environment:
+      PI_CONFIG_HOST_DIR: ${PI_CONFIG_HOST_DIR:-/var/lib/n150/pi-agent}
+      PI_ZOEKT_URL: ${PI_ZOEKT_URL:-}
+      GENERAL_EVIDENCE_VOLUME: ${GENERAL_EVIDENCE_VOLUME:-social-mcp-general-runner-evidence}
+      CONTROL_STATE_VOLUME: ${CONTROL_STATE_VOLUME:-social-mcp-control-runner-state}
+    cpus: 0.40
+    mem_limit: 256m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - executor-ipc:/run/n150
+      # Docker commands resolve bind paths on the HOST, not inside this image.
+      - ${PI_CONFIG_HOST_DIR:-/var/lib/n150/pi-agent}:${PI_CONFIG_HOST_DIR:-/var/lib/n150/pi-agent}:ro
+
+  kvm-executor:
+    build:
+      context: .
+      dockerfile: Dockerfile.kvm-executor
+    image: n150/unified-kvm-executor:0.1.0
+    restart: unless-stopped
+    init: true
+    environment:
+      KVM_GOLDEN_IMAGE: /golden/noble-server-cloudimg-amd64-prepared-9fc0ce202ba8.img
+      KVM_GOLDEN_SHA256: 9fc0ce202ba8def25b126323af21d5a5bb0fb8903cb7367f2fc246ae568e1706
+    cpus: 2.25
+    mem_limit: 5120m
+    memswap_limit: 8192m
+    pids_limit: 1024
+    devices:
+      - /dev/kvm:/dev/kvm:rwm
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=64m"]
+    volumes:
+      - executor-ipc:/run/n150
+      - ${KVM_GOLDEN_HOST_DIR:-/var/lib/recursive-coder-kvm/golden}:/golden:ro
+      - ${KVM_STATE_HOST_DIR:-/var/lib/recursive-coder-kvm/state}:/kvm-state
+
+  run-check-executor:
+    build:
+      context: .
+      dockerfile: Dockerfile.run-check-executor
+    image: n150/unified-run-check-executor:0.1.0
+    restart: unless-stopped
+    init: true
+    network_mode: host
+    environment:
+      RUN_CHECK_SANDBOX_IMAGE: ${RUN_CHECK_SANDBOX_IMAGE:-n150/run-check-sandbox:0.1.4}
+      RUN_CHECK_STAGE_VOLUME: ${RUN_CHECK_STAGE_VOLUME:-social-mcp-run-check-stage}
+      RUN_CHECK_EXECUTOR_PORT: "17343"
+      RUN_CHECK_EXECUTOR_BIND: "127.0.0.1"
+    cpus: 0.50
+    mem_limit: 512m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - run-check-stage:/run-check-stage
+
+  # Build-only worker images; no additional managers.
+  worker-pi:
+    profiles: [images]
+    build:
+      context: .
+      dockerfile: infra/github-runner-autoscaler/worker.Dockerfile
+    image: n150/github-pi-runner-ephemeral:1.1.0-mini-swe-r5
+    entrypoint: ["/bin/true"]
+  worker-general:
+    profiles: [images]
+    build:
+      context: .
+      dockerfile: infra/github-runner-autoscaler/worker-general.Dockerfile
+    image: n150/github-general-runner-ephemeral:0.87.11
+    entrypoint: ["/bin/true"]
+  worker-control:
+    profiles: [images]
+    build:
+      context: .
+      dockerfile: infra/github-runner-autoscaler/control-runner.Dockerfile
+    image: n150/github-control-runner:0.1.8
+    entrypoint: ["/bin/true"]
+  worker-sandbox:
+    profiles: [images]
+    build:
+      context: .
+      dockerfile: infra/github-runner-autoscaler/run-check-sandbox.Dockerfile
+    image: n150/run-check-sandbox:0.1.4
+    entrypoint: ["/bin/true"]
+
+volumes:
+  runner-scheduler:
+    name: social-mcp-runner-scheduler
+    external: true
+  executor-ipc:
+    name: n150-runner-executor-ipc
+  run-check-stage:
+    name: ${RUN_CHECK_STAGE_VOLUME:-social-mcp-run-check-stage}
+    external: true
+  general-runner-evidence:
+    name: ${GENERAL_EVIDENCE_VOLUME:-social-mcp-general-runner-evidence}
+    external: true
+  control-runner-state:
+    name: ${CONTROL_STATE_VOLUME:-social-mcp-control-runner-state}
+    external: true

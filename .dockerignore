@@ -1,0 +1,14 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+__pycache__
+.venv
+tests
+docs
+*.qcow2
+*.img
+*.iso
+state
+evidence

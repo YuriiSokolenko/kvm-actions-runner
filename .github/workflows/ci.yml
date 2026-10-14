@@ -1,0 +1,61 @@
+name: Unified runner manager (offline)
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python and KVM regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile Python sources
+        run: |
+          python3 -m compileall -q n150_runner
+          python3 -m py_compile infra/github-runner-autoscaler/kvm-backend.py infra/github-runner-autoscaler/kvm-egress-proxy.py
+      - name: Run deterministic offline Python tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Check shell and imported JavaScript syntax
+        run: |
+          find infra/github-runner-autoscaler scripts -name '*.sh' -exec bash -n {} +
+          find infra/github-runner-autoscaler scripts -name '*.mjs' -exec node --check {} \;
+      - name: Compose config offline lint
+        run: docker compose --env-file .env.example config --quiet
+      - name: Enforce privilege and migration boundaries
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path("compose.yaml").read_text()
+          assert "runner-scheduler:" in text
+          assert "social-mcp-runner-scheduler" in text
+          assert text.count("/var/run/docker.sock:/var/run/docker.sock") == 2
+          assert text.count("/dev/kvm:/dev/kvm") == 1
+          assert "netcat-openbsd" in Path("Dockerfile.kvm-executor").read_text()
+          assert not Path("infra/github-runner-autoscaler/manager.sh").exists()
+          assert 'RUN_CHECK_EXECUTOR_BIND: "127.0.0.1"' in text
+          assert "server.listen(PORT, host" in Path("infra/github-runner-autoscaler/run-check-executor.mjs").read_text()
+          print("One scheduler; Docker socket only in Docker and sandbox services; KVM only in KVM service")
+          PY
+
+  golden:
+    name: Golden Image offline preparation tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Golden Image builder fixtures
+        run: |
+          bash tests/test_build_recursive_coder_kvm_golden.sh
+          bash tests/test_prepare_recursive_coder_kvm.sh
+          bash tests/test_recursive_coder_kvm_builder_tool.sh
