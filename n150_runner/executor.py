@@ -143,6 +143,13 @@ class DockerExecutor:
 
     def recover(self) -> None:
         self.probe()
+        # An ephemeral container may be left in "exited" after a daemon
+        # crash despite --rm. Remove only our labelled, *stopped* workers.
+        # Never delete the persistent Control container or its state volume.
+        for worker in self.list():
+            pool = self.pools[worker["pool"]]
+            if pool.mode == "ephemeral" and not worker["running"]:
+                self._docker("rm", "--", worker["name"], timeout=30)
 
 
 class KVMExecutor:

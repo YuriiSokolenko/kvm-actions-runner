@@ -24,6 +24,13 @@ class FakeExecutors:
         cmd = request["command"]
         if cmd == "probe":
             return {"ok": True, "disk_free_mb": 30000, "healthy": True}
+        if cmd == "recover":
+            # Matches the Docker executor's scoped, once-per-minute cleanup.
+            self.workers = [
+                w for w in self.workers
+                if w["backend"] != "docker" or w["running"] or w["pool"] == "control"
+            ]
+            return {"ok": True}
         if cmd == "list":
             return {"ok": True, "workers": [
                 {key: worker[key] for key in ("pool", "name", "running")}

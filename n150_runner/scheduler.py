@@ -125,6 +125,7 @@ class Scheduler:
         self.age = defaultdict(int)
         self.last_denials = {}
         self.last_summary = 0.0
+        self.last_recovery = 0.0
 
     def _workers(self) -> list[Worker]:
         return [*self.backends.workers("docker"), *self.backends.workers("kvm")]
@@ -220,6 +221,12 @@ class Scheduler:
 
     def poll(self) -> None:
         now = self.clock()
+        # Periodically remove *stopped* disposable containers. Old Control
+        # state remains preserved. A Docker error defers admissions, never
+        # triggers a daemon restart or prunes unlabelled host containers.
+        if now - self.last_recovery >= 60:
+            self.backends.recover("docker")
+            self.last_recovery = now
         # All reads are taken before mutations; a malformed or inaccessible
         # GitHub response or backend snapshot prevents *every* new launch.
         workers = self._workers()

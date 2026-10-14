@@ -31,6 +31,22 @@ class DockerExecutorTest(unittest.TestCase):
         self.assertNotIn("test_token_12345678901234567890", " ".join(worker_args))
         self.assertTrue(any("RUNNER_TOKEN" in env for args, env in self.calls))
 
+    def test_recovery_only_removes_exited_ephemeral_containers(self):
+        commands = []
+
+        def mocked_docker(*args, token="", env=None, timeout=35):
+            commands.append(args)
+            if args[0] == "ps":
+                return ("n150-gen-eph-leftover\\texited\\tgeneral\\n"
+                        "n150-control\\texited\\tcontrol\\n").replace("\\t", "\t").replace("\\n", "\n")
+            return ""
+
+        self.executor._docker = mocked_docker
+        self.executor.recover()
+        removed = [args for args in commands if args[0] == "rm"]
+        self.assertEqual([("rm", "--", "n150-gen-eph-leftover")], removed)
+        self.assertFalse(any("n150-control" in args for args in removed))
+
     def test_pi_never_receives_docker_socket(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"PI_CONFIG_HOST_DIR": temp}):
             self.executor.start(POOLS["pi"], "n150-pi-eph-123", "test_token_12345678901234567890")
