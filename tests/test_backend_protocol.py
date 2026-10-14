@@ -41,7 +41,7 @@ class DockerExecutorTest(unittest.TestCase):
             if args[:2] == ("image", "inspect"):
                 return "sha256:updated-image"
             if args[0] == "inspect":
-                return '{"Image":"sha256:old-image","Config":{},"HostConfig":{},"Mounts":[]}'
+                return '[{"Image":"sha256:old-image","Config":{},"HostConfig":{},"Mounts":[]}]'
             raise AssertionError(args)
 
         self.executor._docker = fake_docker
